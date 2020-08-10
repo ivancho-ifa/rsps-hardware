@@ -1,0 +1,13 @@
+AllowShortFunctionsOnASingleLine: None
+AllowShortLambdasOnASingleLine: None
+BasedOnStyle: Microsoft
+BraceWrapping:
+  AfterControlStatement: MultiLine
+  AfterFunction: false
+  AfterNamespace: false
+BreakBeforeBraces: Custom
+ColumnLimit: 120
+FixNamespaceComments: true
+IndentWidth: 4
+PointerAlignment: Left
+UseTab: Always
