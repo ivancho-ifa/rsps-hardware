@@ -1,8 +1,9 @@
 {
+	"arduino.path": "C:\\Program Files (x86)\\Arduino\\",
+	"arduino.commandPath": "arduino.exe",
 	"arduino.additionalUrls": [
 		"https://arduino.esp8266.com/stable/package_esp8266com_index.json"
 	],
-	"arduino.path": "C:\\Program Files (x86)\\Arduino\\arduino.exe",
 	"files.associations": {
 		"array": "cpp",
 		"deque": "cpp",
@@ -15,6 +16,8 @@
 		"xutility": "cpp",
 		"string": "cpp",
 		"unordered_map": "cpp",
-		"memory": "cpp"
+		"memory": "cpp",
+		"istream": "cpp",
+		"functional": "cpp"
 	}
 }

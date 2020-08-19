@@ -5,7 +5,9 @@
             "includePath": [
                 "C:\\Users\\ivanx\\AppData\\Local\\Arduino15\\packages\\esp8266\\tools\\**",
                 "C:\\Users\\ivanx\\AppData\\Local\\Arduino15\\packages\\esp8266\\hardware\\esp8266\\2.7.4\\**",
-                "C:\\Users\\ivanx\\OneDrive\\Documents\\Arduino\\libraries\\TinyGPSPlus-1.0.2b\\src\\**"
+				"C:\\Users\\ivanx\\OneDrive\\Documents\\Arduino\\libraries\\TinyGPSPlus-1.0.2b\\src\\**",
+				"C:\\Users\\ivanx\\OneDrive\\Documents\\Arduino\\libraries\\Adafruit_GFX_Library\\**",
+				"C:\\Users\\ivanx\\OneDrive\\Documents\\Arduino\\libraries\\Adafruit_SSD1306\\**"
             ],
             "forcedInclude": [],
             "intelliSenseMode": "msvc-x64",
