@@ -6,12 +6,12 @@
  * Development plan for the "Ride safe, park safe" project:
  *
  *   Done:
- *     @todo Implement configuration mode
- *     @todo Collect data from GPS sensor
- *     @todo Print data on display
+ *     Implement configuration mode
+ *     Collect data from GPS sensor
+ *     Print data on display
+ *     Send data to an MQTT broker
  *
  *   To be done:
- *     @todo Send data to an MQTT broker
  *     @todo Parse data from MQTT broker (server side)
  *     @todo Display data in website
  *     @todo Speed meter with a magnet detector
@@ -21,6 +21,9 @@
 // ESP8266 libraries
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+
+// MQTT libraries
+#include <PubSubClient.h>
 
 // GPS libraries
 #include <SoftwareSerial.h>
@@ -45,10 +48,19 @@ const int8_t gps_tx{D4}; ///< The pin connected to the RX pin of the GPS receive
 const uint32_t gps_baud{9600}; ///< The default baud rate of the GPS receiver.
 SoftwareSerial gps_serial{gps_rx, gps_tx};
 
-String own_ssid;
-const String own_ssid_prefix{"rsps-tracker-"}; ///< This device's network SSID prefix when in soft AP mode.
 String id{"000"}; ///< This device's ID.
+const String name_prefix{"rsps-tracker-"}; ///< This device's name prefix.
+
+String own_ssid;
 ESP8266WebServer configuration_server; ///< The configuration configuration_server of this device.
+bool is_configured = false;
+
+PubSubClient mqtt_client;
+const String mqtt_broker{"test.mosquitto.org"};
+const uint16_t mqtt_port{1883};
+const String mqtt_topic_prefix{"rsps-trackers/"};
+String mqtt_topic;
+WiFiClient wifi_client;
 
 const uint8_t button_0{D0}; ///< Button "0" of the device.
 bool is_in_configuration_mode{false}; ///< The state of button "0".
@@ -83,7 +95,35 @@ void loop() {
 		configuration_mode();
 	}
 
-	gps_parse(display_info);
+	if (is_configured) {
+		if (!mqtt_client.connected())
+			mqtt_reconnect();
+
+		gps_parse([]() {
+			display_info();
+
+			/// @todo Use a JSON parser
+			String gps_data_serialized = "{";
+			if (gps.location.isValid())
+				gps_data_serialized += ("\"latitude\":" + String{gps.location.lat()} + "," +
+										"\"longitude\":" + String{gps.location.lng()});
+			if (gps.altitude.isValid()) {
+				if (gps.location.isValid())
+					gps_data_serialized += ",";
+				gps_data_serialized += "\"altitude\":" + String{gps.altitude.meters()};
+			}
+			if (gps.speed.isValid()) {
+				if (gps.location.isValid() || gps.altitude.isValid())
+					gps_data_serialized += ",";
+				gps_data_serialized += "\"speed\":" + String{gps.speed.kmph()};
+			}
+			gps_data_serialized +="}";
+
+			const String mqtt_topic = "rsps/trackers/" + name_prefix + id;
+			mqtt_client.publish(mqtt_topic.c_str(), gps_data_serialized.c_str());
+		});
+	} else
+		gps_parse(display_info);
 
 	/// @todo Test how this is behaving on disconnecting the GPS receiver...
 	if (millis() > 5000 && gps.charsProcessed() < 10) {
@@ -146,7 +186,8 @@ void gps_parse(const on_parsed_gps& cb) {
  */
 
 void configuration_mode() {
-	own_ssid = own_ssid_prefix + id;
+	/// @todo Extract to a separate global variable.
+	own_ssid = name_prefix + id;
 	if (WiFi.softAP(own_ssid, "")) {
 		display.clearDisplay();
 		println("Entered \"Client setup mode\"...", 0, 0);
@@ -187,6 +228,8 @@ void configuration_mode() {
 						print_message_in_configuration_mode(confirmation_message);
 
 						configuration_server.send(200, "text/plain", confirmation_message);
+
+						is_configured = true;
 
 						return; ///< Stop execution on success
 					}
@@ -246,6 +289,47 @@ void print_message_in_configuration_mode(const char* message) {
 
 void print_message_in_configuration_mode(const String& message) {
 	print_message_in_configuration_mode(message.c_str());
+}
+
+
+void mqtt_reconnect() {
+	if (WiFi.status() != WL_CONNECTED) {
+		const String ssid = "rsps-network";
+		const String ssid_password = "rsps-network-password";
+		display.clearDisplay();
+		println("Connecting to " + ssid, 0, 0);
+		display.display();
+
+		WiFi.begin("rsps-network", "rsps-network-password");
+		while (WiFi.status() != WL_CONNECTED) {
+			delay(500);
+			print(".");
+			display.display();
+		}
+		display.clearDisplay();
+		println("Connected to " + ssid, 0, 0);
+		display.display();
+		delay(5000);
+	}
+
+	mqtt_client.setServer(mqtt_broker.c_str(), mqtt_port);
+	mqtt_client.setClient(wifi_client);
+
+	while (!mqtt_client.connected()) {
+		display.clearDisplay();
+		println("Attempt to connect to MQTT broker " + mqtt_broker + ":" + mqtt_port, 0, 0);
+		display.display();
+		/// @todo Extract to a separate global variable.
+		const String mqtt_id = name_prefix + id;
+		mqtt_client.connect(mqtt_id.c_str());
+
+		delay(3000);
+	}
+
+	display.clearDisplay();
+	println("Connected to MQTT broker " + mqtt_broker + ":" + mqtt_port, 0, 0);
+	display.display();
+	delay(5000);
 }
 
 
