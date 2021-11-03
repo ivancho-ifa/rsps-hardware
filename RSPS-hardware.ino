@@ -12,6 +12,7 @@
  *     Send data to an MQTT broker
  *
  *   To be done:
+ *     @todo Implement locking mechanism
  *     @todo Parse data from MQTT broker (server side)
  *     @todo Display data in website
  *     @todo Speed meter with a magnet detector
@@ -19,8 +20,9 @@
 
 
 // ESP8266 libraries
-#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266WiFi.h>
 
 // MQTT libraries
 #include <PubSubClient.h>
@@ -67,6 +69,11 @@ bool is_in_configuration_mode{false}; ///< The state of button "0".
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1); ///< Display connected to the I2C pins
 
+bool locked = false;
+bool alarm_started = false;
+bool notified = false;
+const int alarm_pin = D5;
+
 
 void setup() {
 	Serial.begin(115200);
@@ -79,20 +86,43 @@ void setup() {
 	display.setTextSize(1);
 	display.setTextColor(WHITE);
 
-	println("Ride safe, park safe!", 0, 0);
+	println("Ride safe, park safe, baby!", 0, 6);
 	display.display();
 	delay(5000);
 
 	gps_serial.begin(gps_baud);
 
 	pinMode(button_0, INPUT);
+
+	pinMode(alarm_pin, OUTPUT);
 }
 
 
 void loop() {
-	if (button_pressed(button_0)) {
+	if (!is_configured && button_pressed(button_0)) {
 		is_in_configuration_mode = !is_in_configuration_mode;
 		configuration_mode();
+	}
+
+	if (is_configured && button_pressed(button_0)) {
+		if (alarm_started) {
+			alarm_started = false;
+			notified = false;
+
+			noTone(alarm_pin);
+
+			display.clearDisplay();
+			println("Turned off alarm!", 0, 0);
+			display.display();
+			delay(5000);
+		}
+		else
+			locked = !locked;
+
+		display.clearDisplay();
+		println(String{"Bike is "} + (locked ? "locked" : "unlocked") + "!", 0, 0);
+		display.display();
+		delay(5000);
 	}
 
 	if (is_configured) {
@@ -100,7 +130,37 @@ void loop() {
 			mqtt_reconnect();
 
 		gps_parse([]() {
-			display_info();
+			if (locked) {
+				if (gps.speed.isValid() && gps.speed.kmph() >= 1) {
+					alarm_started = true;
+
+					if (!notified) {
+						tone(alarm_pin, 1000);
+
+						display.clearDisplay();
+						println("Bike is moving while locked!", 0, 0);
+
+						println("Sending notification...");
+						HTTPClient http;
+						http.begin("http://maker.ifttt.com/trigger/bike_alarm_started/with/key/"
+								   "nKmP76Jyu4Cj16BaV1SpYW-g4DgGDlD5G6D8BuDQg_4");
+						const int notification_status = http.GET();
+
+						if (notification_status == 200) {
+							println("Notification sent!");
+							notified = true;
+						}
+						else
+							println("Failed to notify...");
+
+						http.end();
+
+						display.display();
+					}
+				}
+			}
+			else
+				display_info();
 
 			/// @todo Use a JSON parser
 			String gps_data_serialized = "{";
@@ -117,6 +177,9 @@ void loop() {
 					gps_data_serialized += ",";
 				gps_data_serialized += "\"speed\":" + String{gps.speed.kmph()};
 			}
+			if (gps.speed.isValid() || gps.location.isValid() || gps.altitude.isValid())
+				gps_data_serialized += ",";
+			gps_data_serialized += String{"\"locked\":"} + (locked ? "true" : "false");
 			gps_data_serialized +="}";
 
 			const String mqtt_topic = "rsps/trackers/" + name_prefix + id;
@@ -125,7 +188,6 @@ void loop() {
 	} else
 		gps_parse(display_info);
 
-	/// @todo Test how this is behaving on disconnecting the GPS receiver...
 	if (millis() > 5000 && gps.charsProcessed() < 10) {
 		display.clearDisplay();
 		println("No GPS data received... check wiring or find a place with better signal", 0, 0);
@@ -146,11 +208,15 @@ void println(const char* message) {
 
 void println(const char* message, int16_t x, int16_t y) {
 	display.setCursor(x, y);
-	print(message);
+	println(message);
 }
 
 void println(const String& message) {
 	println(message.c_str());
+}
+
+void println(const String& message, int16_t x, int16_t y) {
+	println(message.c_str(), x, y);
 }
 
 
@@ -225,9 +291,14 @@ void configuration_mode() {
 						id = plain.substring(tracker_id_prefix.length());
 
 						const String confirmation_message = "Successfully set tracker's ID to " + id;
-						print_message_in_configuration_mode(confirmation_message);
 
 						configuration_server.send(200, "text/plain", confirmation_message);
+
+						display.clearDisplay();
+						println(confirmation_message, 0, 0);
+						println("You can now exit \"Client setup mode\"");
+						display.display();
+						delay(5000);
 
 						is_configured = true;
 
@@ -237,14 +308,14 @@ void configuration_mode() {
 
 				/// Handle parsing error
 				const char* error_message = "Failed to parse tracker-id field";
-				print_message_in_configuration_mode(error_message);
 				configuration_server.send(400, "text/plain", error_message);
+				print_message_in_configuration_mode(error_message);
 			}
 			else {
 				/// @todo Print name of method.
 				const char* errorMessage = "Method Not Allowed";
-				print_message_in_configuration_mode(errorMessage);
 				configuration_server.send(405, "text/plain", errorMessage);
+				print_message_in_configuration_mode(errorMessage);
 			}
 		});
 		configuration_server.onNotFound([]() {
@@ -389,9 +460,14 @@ void display_info() {
 
 	print("Speed: ");
 	if (gps.speed.isValid())
-		println(String(gps.speed.kmph(), 6));
+		println(String(round(gps.speed.kmph())));
 	else
 		println("Not Available");
+
+	if (locked)
+		println("Locked");
+	else
+		println("Unlocked");
 
 	Serial.println();
 	display.display();
